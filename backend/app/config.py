@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://trinetra:secure_password@localhost:5432/trinetra_db"
-    DATABASE_POOL_SIZE: int = 20
+    DATABASE_POOL_SIZE: int = 5
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # Threat Scoring
     LOITER_THRESHOLD_SECONDS: float = 15.0
     VEHICLE_STATIONARY_THRESHOLD: float = 300.0  # 5 minutes
-    RAPID_MOVEMENT_THRESHOLD: float = 150.0  # pixels per second
+    RAPID_MOVEMENT_THRESHOLD: float = 100.0  # pixels per second
     
     # Alert Thresholds
     CRITICAL_THREAT_SCORE: float = 0.9
