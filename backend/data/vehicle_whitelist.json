@@ -1,0 +1,16 @@
+{
+  "vehicles": [
+    {
+      "license_plate": "KA01MH1234",
+      "vehicle_type": "car",
+      "is_authorized": true,
+      "owner_name": "Authorized Personnel"
+    },
+    {
+      "license_plate": "DL01G9999",
+      "vehicle_type": "car",
+      "is_authorized": true,
+      "owner_name": "Government Vehicle"
+    }
+  ]
+}

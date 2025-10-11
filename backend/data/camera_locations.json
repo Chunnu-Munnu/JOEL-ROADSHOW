@@ -1,0 +1,34 @@
+{
+  "cameras": [
+    {
+      "id": "laptop_cam",
+      "name": "Main Gate Camera",
+      "stream_url": "0",
+      "stream_type": "webcam",
+      "latitude": 12.9716,
+      "longitude": 77.5946,
+      "zone_name": "Main Gate",
+      "restricted_zone": true
+    },
+    {
+      "id": "phone_1",
+      "name": "Perimeter North",
+      "stream_url": "http://192.168.1.105:8080/video",
+      "stream_type": "mobile",
+      "latitude": 12.9720,
+      "longitude": 77.5950,
+      "zone_name": "Perimeter",
+      "restricted_zone": true
+    },
+    {
+      "id": "phone_2",
+      "name": "Parking Area",
+      "stream_url": "http://192.168.1.106:8080/video",
+      "stream_type": "mobile",
+      "latitude": 12.9710,
+      "longitude": 77.5940,
+      "zone_name": "Parking",
+      "restricted_zone": false
+    }
+  ]
+}
