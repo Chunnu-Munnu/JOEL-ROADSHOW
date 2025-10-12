@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRINETRA - Threat Notifications</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0A0E27 0%, #1A1D2E 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(255, 0, 0, 0.1);
+            border-radius: 10px;
+            border: 2px solid #FF0000;
+        }
+        h1 {
+            color: #FF0000;
+            font-size: 2.5em;
+            text-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+        }
+        .nav {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+        .nav a {
+            padding: 10px 20px;
+            background: rgba(0, 102, 204, 0.3);
+            color: #fff;
+            text-decoration: none;
+            border-radius: 5px;
+        }
+        .nav a:hover {
+            background: #0066CC;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: rgba(26, 29, 46, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 2em;
+            color: #00FF00;
+            font-weight: bold;
+        }
+        .notifications-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        .notification-card {
+            background: rgba(26, 29, 46, 0.9);
+            border-radius: 15px;
+            overflow: hidden;
+            border: 3px solid #FF0000;
+            box-shadow: 0 5px 20px rgba(255, 0, 0, 0.3);
+        }
+        .notification-image {
+            width: 100%;
+            height: 250px;
+            object-fit: cover;
+            background: #000;
+        }
+        .notification-content {
+            padding: 20px;
+        }
+        .threat-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+        .threat-level {
+            padding: 5px 15px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .threat-level.CRITICAL {
+            background: #FF0000;
+        }
+        .threat-level.HIGH {
+            background: #FFA500;
+            color: #000;
+        }
+        .threat-type {
+            font-size: 1.2em;
+            color: #FF6B6B;
+            margin-bottom: 10px;
+        }
+        .threat-details {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+        }
+        .behavior-tag {
+            display: inline-block;
+            background: rgba(255, 0, 0, 0.2);
+            padding: 5px 10px;
+            border-radius: 3px;
+            margin: 3px;
+            font-size: 0.85em;
+        }
+        .actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .btn {
+            padding: 12px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1em;
+        }
+        .btn-approve {
+            background: #00FF00;
+            color: #000;
+        }
+        .btn-reject {
+            background: #FF0000;
+            color: #fff;
+        }
+        .btn:hover {
+            transform: scale(1.05);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px;
+            color: #888;
+        }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 5px;
+            font-weight: bold;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+        .toast.success {
+            background: #00FF00;
+            color: #000;
+        }
+        .toast.error {
+            background: #FF0000;
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚠️  THREAT NOTIFICATIONS</h1>
+            <div class="nav">
+                <a href="/">📹 Live Feed</a>
+                <a href="/notifications" class="active">🔔 Notifications</a>
+                <a href="/logs">🔗 Blockchain Logs</a>
+            </div>
+        </header>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="pendingCount">0</div>
+                <div>Pending Review</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="approvedCount">0</div>
+                <div>Approved</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="rejectedCount">0</div>
+                <div>Rejected</div>
+            </div>
+        </div>
+
+        <div class="notifications-grid" id="notificationsGrid">
+            <div class="empty-state">
+                <p>Loading notifications...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let notifications = [];
+
+        async function loadNotifications() {
+            try {
+                const response = await fetch('http://localhost:8000/api/notifications/pending');
+                const data = await response.json();
+                
+                notifications = data.notifications || [];
+                document.getElementById('pendingCount').textContent = notifications.length;
+                
+                renderNotifications();
+            } catch (error) {
+                console.error('Error loading notifications:', error);
+                showToast('Failed to load notifications', 'error');
+            }
+        }
+
+        function renderNotifications() {
+            const grid = document.getElementById('notificationsGrid');
+            
+            if (notifications.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><p>✅ No pending threats</p></div>';
+                return;
+            }
+
+            grid.innerHTML = notifications.map(notif => `
+                <div class="notification-card" id="card-${notif.snapshot_id}">
+                    <img src="data:image/jpeg;base64,${notif.image_base64}" class="notification-image" alt="Threat">
+                    <div class="notification-content">
+                        <div class="threat-header">
+                            <span class="threat-level ${notif.threat_level}">${notif.threat_level}</span>
+                            <span style="color: #888;">Track #${notif.track_id}</span>
+                        </div>
+                        
+                        <div class="threat-type">${formatThreatType(notif.threat_type)}</div>
+                        
+                        <div class="threat-details">
+                            <div class="detail-item">
+                                <span>Camera:</span>
+                                <span>${notif.camera_id}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span>Score:</span>
+                                <span>${(notif.score * 100).toFixed(1)}%</span>
+                            </div>
+                            <div class="detail-item">
+                                <span>Time:</span>
+                                <span>${new Date(notif.timestamp * 1000).toLocaleString()}</span>
+                            </div>
+                        </div>
+
+                        <div>
+                            ${notif.behaviors.map(b => `<span class="behavior-tag">${b}</span>`).join('')}
+                        </div>
+
+                        <div class="actions">
+                            <button class="btn btn-approve" onclick="approveNotification('${notif.snapshot_id}')">
+                                ✅ APPROVE & LOG
+                            </button>
+                            <button class="btn btn-reject" onclick="rejectNotification('${notif.snapshot_id}')">
+                                ❌ REJECT
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function formatThreatType(type) {
+            return type.replace(/_/g, ' ').toUpperCase();
+        }
+
+        async function approveNotification(snapshotId) {
+            try {
+                const response = await fetch(`http://localhost:8000/api/notifications/${snapshotId}/approve`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.blockchain_tx) {
+                    showToast(`✅ Approved & logged to blockchain: ${data.blockchain_tx.substring(0, 10)}...`, 'success');
+                } else {
+                    showToast('✅ Approved (blockchain unavailable)', 'success');
+                }
+                
+                removeCard(snapshotId);
+                updateCounts();
+            } catch (error) {
+                showToast('❌ Approval failed', 'error');
+            }
+        }
+
+        async function rejectNotification(snapshotId) {
+            try {
+                await fetch(`http://localhost:8000/api/notifications/${snapshotId}/reject`, {
+                    method: 'POST'
+                });
+                
+                showToast('❌ Threat rejected as false positive', 'success');
+                removeCard(snapshotId);
+                updateCounts();
+            } catch (error) {
+                showToast('❌ Rejection failed', 'error');
+            }
+        }
+
+        function removeCard(snapshotId) {
+            const card = document.getElementById(`card-${snapshotId}`);
+            if (card) {
+                card.style.opacity = '0';
+                setTimeout(() => card.remove(), 300);
+            }
+            
+            notifications = notifications.filter(n => n.snapshot_id !== snapshotId);
+            if (notifications.length === 0) {
+                renderNotifications();
+            }
+        }
+
+        function updateCounts() {
+            const pending = notifications.length;
+            document.getElementById('pendingCount').textContent = pending;
+        }
+
+        function showToast(message, type) {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Load on page load
+        loadNotifications();
+        
+        // Refresh every 5 seconds
+        setInterval(loadNotifications, 5000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "name": "trinetra-production-blockchain",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "hardhat": "^3.0.7"
+  }
+}
