@@ -71,3 +71,12 @@ Technologies used in the project:
 *   Yolov8
 *   html
 *   Roboflow/Kaggle( for ML models)
+
+
+<h2>💖Support</h2>
+
+For any further inquiries/clarification contact us at:<p>Amogh Sharma: +91 84959 10475 </p> </n>
+ Email : amoghrules20@gmail.com
+<p>Aariz Qureshi: +91 9898873166</p>
+</n>
+Email : Aarizqureshi.20211081@gmail.com
