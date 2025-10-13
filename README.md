@@ -75,7 +75,7 @@ Technologies used in the project:
 
 <h2>💖Support</h2>
 
-For any further inquiries/clarification contact us at:<p>Amogh Sharma: +91 84959 10475 </p> </n>
+For any further inquiries/clarification contact us at:<p>Amogh Sharma: +91 84959 10475 </p>
  Email : amoghrules20@gmail.com
 <p>Aariz Qureshi: +91 9898873166</p>
 Email : Aarizqureshi.20211081@gmail.com
