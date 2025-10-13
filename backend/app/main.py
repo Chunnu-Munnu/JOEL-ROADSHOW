@@ -6,10 +6,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import asyncio
-import json
 import base64
 from datetime import datetime
 import uvicorn
+import numpy as np
 
 # CORRECT IMPORTS - Based on your folder structure
 from app.core.detection.yolo_detector import YOLODetector
@@ -44,7 +44,6 @@ try:
 except Exception as e:
     print(f"⚠️  Warning: Could not load analyzer: {e}")
 
-
 @app.on_event("startup")
 async def startup():
     print("\n" + "="*60)
@@ -53,7 +52,6 @@ async def startup():
     print(f"📡 Server: http://localhost:8000")
     print(f"📚 API Docs: http://localhost:8000/docs")
     print("="*60 + "\n")
-
 
 @app.get("/")
 async def root():
@@ -65,7 +63,6 @@ async def root():
         "analyzer": analyzer is not None
     }
 
-
 @app.get("/api/health")
 async def health():
     return {
@@ -76,6 +73,38 @@ async def health():
         }
     }
 
+def clean_detection_obj(det):
+    """
+    Returns a detection dict with all NumPy types converted to Python types.
+    Only runs on final output, so does not affect YOLO internals or performance.
+    """
+    res = {}
+    for k, v in det.items():
+        if isinstance(v, np.integer):
+            res[k] = int(v)
+        elif isinstance(v, np.floating):
+            res[k] = float(v)
+        elif isinstance(v, np.ndarray):
+            res[k] = v.tolist()
+        else:
+            res[k] = v
+    return res
+
+def clean_threat_obj(threat):
+    """
+    Same conversion for threat object.
+    """
+    res = {}
+    for k, v in threat.items():
+        if isinstance(v, np.integer):
+            res[k] = int(v)
+        elif isinstance(v, np.floating):
+            res[k] = float(v)
+        elif isinstance(v, np.ndarray):
+            res[k] = v.tolist()
+        else:
+            res[k] = v
+    return res
 
 @app.websocket("/ws/video")
 async def video_stream(websocket: WebSocket):
@@ -110,6 +139,8 @@ async def video_stream(websocket: WebSocket):
                 except Exception as e:
                     print(f"Detection error: {e}")
             
+            clean_detections = [clean_detection_obj(det) for det in detections]
+
             # Analyze threats
             threats = []
             if analyzer and detections:
@@ -120,35 +151,42 @@ async def video_stream(websocket: WebSocket):
                         'restricted_zone': False
                     }
                     threats = analyzer.analyze_threats(
-                        detections, 
+                        clean_detections, 
                         'laptop_cam',
                         camera_info
                     )
                 except Exception as e:
                     print(f"Threat analysis error: {e}")
             
+            clean_threats = [clean_threat_obj(threat) for threat in threats]
+
             # Draw boxes
             annotated_frame = frame.copy()
-            if detector and detections:
+            if detector and clean_detections:
                 try:
                     annotated_frame = detector.draw_detections(
-                        frame, detections, threats
+                        frame, clean_detections, clean_threats
                     )
                 except Exception as e:
                     print(f"Drawing error: {e}")
             
             # Encode and send
             _, buffer = cv2.imencode('.jpg', annotated_frame, 
-                                    [cv2.IMWRITE_JPEG_QUALITY, 80])
+                                     [cv2.IMWRITE_JPEG_QUALITY, 80])
             frame_base64 = base64.b64encode(buffer).decode('utf-8')
             
-            await websocket.send_json({
+            response = {
                 "frame": frame_base64,
-                "detections": detections,
-                "threats": threats,
+                "detections": clean_detections,
+                "threats": clean_threats,
                 "timestamp": datetime.now().isoformat(),
-                "frame_number": frame_count
-            })
+                "frame_number": int(frame_count)
+            }
+            try:
+                await websocket.send_json(response)
+            except TypeError as e:
+                print("❌ Serialization error:", e)
+                print("❌ Problematic data:", response)
             
             await asyncio.sleep(0.1)
             
@@ -158,7 +196,6 @@ async def video_stream(websocket: WebSocket):
         print(f"❌ Stream error: {e}")
     finally:
         cap.release()
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

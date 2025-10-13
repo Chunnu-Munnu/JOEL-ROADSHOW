@@ -1,22 +1,33 @@
+"""
+app/core/analysis/threat_scorer.py
+Behavioral threat analysis with temporal tracking
+"""
 from typing import List, Dict, Any
 from collections import defaultdict
 import time
 import numpy as np
-from app.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Thresholds
+STANDING_THRESHOLD_SECONDS = 10.0
+CROUCHING_THRESHOLD_SECONDS = 10.0
+MAX_MOVEMENT_PIXELS = 100
+GROUP_SIZE_THRESHOLD = 6
+
 
 class ThreatScorer:
     """Behavioral threat analysis with temporal tracking"""
     
     def __init__(self):
-        # Track history: {camera_id: {track_id: [(timestamp, position, data), ...]}}
+        # Track history: {camera_id: {track_id: [(timestamp, position, pose, data), ...]}}
         self.track_history = defaultdict(lambda: defaultdict(list))
         self.track_first_seen = {}
+        self.high_risk_tracks = set()  # Once flagged, stays red
         
     def analyze_threats(self, detections: List[Dict[str, Any]], camera_id: str, camera_info: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Analyze detections and generate HIGH risk threats only"""
+        """Analyze detections and generate threats"""
         threats = []
         current_time = time.time()
         
@@ -30,118 +41,148 @@ class ThreatScorer:
             threat_score = 0.0
             threat_behaviors = []
             threat_type = 'normal'
+            is_high_risk = False
             
-            # 🔫 WEAPON DETECTION = INSTANT HIGH RISK
+            # 🔫 WEAPON DETECTION = INSTANT CRITICAL
             if det.get('weapon'):
                 threat_score = 1.0
                 threat_behaviors.append('weapon_detected')
-                threat_type = f"armed_person_{det['weapon']['type']}"
-                logger.critical(f"🔫 WEAPON DETECTED: Track {track_id} - {det['weapon']['type']}")
+                weapon_type = det['weapon']['type']
+                threat_type = f"armed_person_{weapon_type}"
+                is_high_risk = True
+                self.high_risk_tracks.add(track_id)
+                logger.critical(f"🔫 WEAPON: Track {track_id} - {weapon_type}")
             
-            # 👤 PERSON-SPECIFIC THREATS
+            # 👤 PERSON BEHAVIOR ANALYSIS
             if det['class'] == 'person':
                 person_threat = self._analyze_person_threat(det, track_id, camera_id, current_time)
-                threat_score = max(threat_score, person_threat['score'])
-                threat_behaviors.extend(person_threat['behaviors'])
-                if person_threat['type']:
-                    threat_type = person_threat['type']
-            
-            # 🚗 VEHICLE THREATS
-            if det['class'] in ['car', 'truck', 'bus', 'motorcycle']:
-                # Only flag if unauthorized (check in main.py with plate validation)
-                pass
-            
-            # 👥 GROUP THREATS (checked separately below)
-            
-            # ✅ ONLY SEND HIGH RISK TO NOTIFICATIONS
-            if threat_score >= settings.HIGH_THREAT_SCORE:
-                threat_level = self._get_threat_level(threat_score)
                 
-                threats.append({
-                    'track_id': track_id,
-                    'class': det['class'],
-                    'score': min(threat_score, 1.0),
-                    'level': threat_level,
-                    'behaviors': threat_behaviors,
-                    'type': threat_type,
-                    'position': det['center'],
-                    'bbox': det['bbox'],
-                    'camera_id': camera_id,
-                    'timestamp': current_time,
-                    'metadata': {
-                        'pose': det.get('pose'),
-                        'weapon': det.get('weapon'),
-                        'is_camouflaged': det.get('is_camouflaged', False)
-                    }
-                })
+                if person_threat['score'] > threat_score:
+                    threat_score = person_threat['score']
+                    threat_behaviors.extend(person_threat['behaviors'])
+                    threat_type = person_threat['type'] or threat_type
+                
+                if person_threat['is_high_risk']:
+                    is_high_risk = True
+                    self.high_risk_tracks.add(track_id)
+            
+            # Keep track flagged as high risk
+            if track_id in self.high_risk_tracks:
+                is_high_risk = True
+                threat_score = max(threat_score, 0.7)
+            
+            threat_level = self._get_threat_level(threat_score)
+            
+            threats.append({
+                'track_id': track_id,
+                'class': det['class'],
+                'score': min(threat_score, 1.0),
+                'level': threat_level,
+                'behaviors': threat_behaviors,
+                'type': threat_type,
+                'position': det['center'],
+                'bbox': det['bbox'],
+                'camera_id': camera_id,
+                'timestamp': current_time,
+                'is_high_risk': is_high_risk,
+                'metadata': {
+                    'pose': det.get('pose'),
+                    'weapon': det.get('weapon'),
+                    'confidence': det.get('confidence', 0.0)
+                }
+            })
         
-        # 👥 GROUP BEHAVIOR ANALYSIS (6+ people)
+        # 👥 GROUP ANALYSIS
         group_threats = self._analyze_group_behaviors(detections, camera_id, current_time)
         threats.extend(group_threats)
         
         return threats
     
     def _analyze_person_threat(self, detection: Dict, track_id: int, camera_id: str, current_time: float) -> Dict:
-        """Analyze person threats with STRICT thresholds"""
+        """Analyze person threats - STANDING, CROUCHING, CRAWLING"""
         score = 0.0
         behaviors = []
         threat_type = None
+        is_high_risk = False
         
         history = self.track_history[camera_id][track_id]
         
         if len(history) < 2:
-            return {'score': 0.0, 'behaviors': [], 'type': None}
+            return {'score': 0.0, 'behaviors': [], 'type': None, 'is_high_risk': False}
         
-        first_time, first_pos, first_data = history[0]
-        last_time, last_pos, last_data = history[-1]
-        
+        first_time, first_pos, first_pose, _ = history[0]
         duration = current_time - first_time
-        distance = np.linalg.norm(np.array(first_pos) - np.array(last_pos))
         
-        pose = detection.get('pose')
+        # Calculate movement
+        distance = np.linalg.norm(np.array(detection['center']) - np.array(first_pos))
         
-        # ⏱️ STANDING STATIONARY 60+ SECONDS = HIGH RISK
-        if pose == 'standing' and duration >= settings.STANDING_THRESHOLD_SECONDS and distance < 50:
-            score = 0.8
-            behaviors.append('standing_10s')
-            threat_type = 'person_standing_still_for_long_time near_sensitive_area'
-            logger.warning(f"⏱️ Person #{track_id} standing {duration:.1f}s")
+        pose = detection.get('pose', 'unknown')
         
-        # 🧎 CROUCHING 45+ SECONDS = HIGH RISK
-        elif pose == 'crouching' and duration >= settings.CROUCHING_THRESHOLD_SECONDS and distance < 50:
-            score = 0.85
-            behaviors.append('crouching_45s')
-            threat_type = 'suspicious_posture'
-            logger.warning(f"🧎 Person #{track_id} crouching {duration:.1f}s")
+        # 🤸 CRAWLING = INSTANT CRITICAL
+        if pose == 'crawling':
+            score = 0.95
+            behaviors.append('crawling_detected')
+            threat_type = 'person_crawling_infiltration'
+            is_high_risk = True
+            logger.critical(f"🚨 CRAWLING: Track {track_id}")
         
-        # 🎭 CAMOUFLAGE ESCALATION (2 minutes → HIGH RISK)
-        elif detection.get('is_camouflaged'):
-            if duration < settings.CAMOUFLAGE_LOW_RISK_SECONDS:
-                score = 0.3  # LOW RISK initially
-                behaviors.append('camouflage_detected')
-                threat_type = 'possible_wildlife'
-            else:
-                score = 0.85  # HIGH RISK after 2 minutes
-                behaviors.append('camouflage_prolonged')
-                threat_type = 'potential_infiltrator'
-                logger.warning(f"🎭 Camouflaged entity #{track_id} for {duration:.1f}s")
+        # 🧎 CROUCHING 10+ SECONDS = CRITICAL
+        elif pose == 'crouching':
+            crouching_duration = self._get_pose_duration(history, 'crouching', current_time)
+            
+            if crouching_duration >= CROUCHING_THRESHOLD_SECONDS:
+                score = 0.95
+                behaviors.append(f'crouching_{int(crouching_duration)}s')
+                threat_type = 'person_crouching_suspicious'
+                is_high_risk = True
+                logger.critical(f"🚨 CROUCHING: Track {track_id} for {crouching_duration:.1f}s")
+            elif crouching_duration >= 3.0:
+                score = 0.6
+                behaviors.append('crouching_detected')
+                threat_type = 'person_crouching'
         
-        # 🤸 CRAWLING = MEDIUM RISK (not high enough for notification)
-        elif pose == 'crawling':
-            score = 0.6  # Won't trigger notification (< 0.7)
-            behaviors.append('crawling')
-            threat_type = 'infiltration_attempt'
+        # ⏱️ STANDING STILL 10+ SECONDS = HIGH (LOITERING)
+        elif pose == 'standing':
+            if duration >= STANDING_THRESHOLD_SECONDS and distance < MAX_MOVEMENT_PIXELS:
+                # Check if really stationary
+                recent_positions = [pos for t, pos, p, _ in history[-20:]]
+                if len(recent_positions) >= 2:
+                    movements = [
+                        np.linalg.norm(np.array(recent_positions[i]) - np.array(recent_positions[0]))
+                        for i in range(len(recent_positions))
+                    ]
+                    max_movement = max(movements) if movements else 0
+                    
+                    if max_movement < MAX_MOVEMENT_PIXELS:
+                        score = 0.85
+                        behaviors.append(f'loitering_{int(duration)}s')
+                        threat_type = 'person_loitering_suspicious'
+                        is_high_risk = True
+                        logger.warning(f"⚠️  LOITERING: Track {track_id} for {duration:.1f}s")
         
-        return {'score': score, 'behaviors': behaviors, 'type': threat_type}
+        return {
+            'score': score, 
+            'behaviors': behaviors, 
+            'type': threat_type,
+            'is_high_risk': is_high_risk
+        }
+    
+    def _get_pose_duration(self, history, target_pose: str, current_time: float) -> float:
+        """Calculate how long a person has been in a specific pose"""
+        duration = 0.0
+        for i in range(len(history) - 1, -1, -1):
+            t, pos, pose, _ = history[i]
+            if pose != target_pose:
+                break
+            duration = current_time - t
+        return duration
     
     def _analyze_group_behaviors(self, detections: List[Dict], camera_id: str, current_time: float) -> List[Dict]:
         """Detect large groups (6+ people)"""
         threats = []
-        
         persons = [d for d in detections if d['class'] == 'person']
         
-        # 👥 6+ PEOPLE = HIGH RISK
-        if len(persons) >= settings.GROUP_SIZE_THRESHOLD:
+        if len(persons) >= GROUP_SIZE_THRESHOLD:
             positions = np.array([p['center'] for p in persons])
             
             threats.append({
@@ -149,15 +190,16 @@ class ThreatScorer:
                 'class': 'group',
                 'score': 0.8,
                 'level': 'HIGH',
-                'behaviors': ['large_group'],
-                'type': 'group_assembly',
+                'behaviors': ['large_group_assembly'],
+                'type': 'group_assembly_suspicious',
                 'position': list(np.mean(positions, axis=0).astype(int)),
                 'bbox': None,
                 'camera_id': camera_id,
                 'timestamp': current_time,
+                'is_high_risk': True,
                 'metadata': {'group_size': len(persons)}
             })
-            logger.warning(f"👥 Large group detected: {len(persons)} people")
+            logger.warning(f"👥 GROUP: {len(persons)} people detected")
         
         return threats
     
@@ -175,19 +217,20 @@ class ThreatScorer:
             self.track_history[camera_id][track_id].append((
                 current_time,
                 det['center'],
+                det.get('pose', 'unknown'),
                 det
             ))
             
-            # Keep last 5 minutes only
+            # Keep last 5 minutes
             self.track_history[camera_id][track_id] = [
-                (t, pos, data) for t, pos, data in self.track_history[camera_id][track_id]
+                (t, pos, pose, data) for t, pos, pose, data in self.track_history[camera_id][track_id]
                 if current_time - t < 300
             ]
             
             if track_id not in self.track_first_seen:
                 self.track_first_seen[track_id] = current_time
         
-        # Clean up old tracks
+        # Cleanup old tracks
         for track_id in list(self.track_history[camera_id].keys()):
             if track_id not in active_tracks:
                 history = self.track_history[camera_id][track_id]
@@ -195,6 +238,9 @@ class ThreatScorer:
                     del self.track_history[camera_id][track_id]
                     if track_id in self.track_first_seen:
                         del self.track_first_seen[track_id]
+                    if track_id in self.high_risk_tracks:
+                        self.high_risk_tracks.discard(track_id)
+                        logger.info(f"✅ Track {track_id} left camera")
     
     def _get_threat_level(self, score: float) -> str:
         """Convert score to threat level"""
