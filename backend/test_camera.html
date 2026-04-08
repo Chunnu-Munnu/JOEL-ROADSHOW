@@ -74,12 +74,17 @@
             background: #000;
             border-radius: 10px;
             overflow: hidden;
+            /* fix height so layout doesn't jump */
+            min-height: 300px;
         }
 
         #videoFeed {
             width: 100%;
             height: auto;
             display: block;
+            /* GPU-accelerated compositing */
+            will-change: contents;
+            transform: translateZ(0);
         }
 
         .loading {
@@ -249,7 +254,7 @@
             <div class="video-section">
                 <h2 style="margin-bottom: 15px; color: #0066CC;">📹 Live Camera Feed</h2>
                 <div class="video-container">
-                    <img id="videoFeed" alt="Video Feed">
+                    <img id="videoFeed" alt="Video Feed" style="display:none;">
                     <div class="loading" id="loading">
                         <div class="spinner"></div>
                         <div>Connecting to camera...</div>
@@ -304,31 +309,48 @@
         let frameCount = 0;
         let lastFrameTime = Date.now();
         let fpsCounter = 0;
+        let uiUpdateCounter = 0;
+        const UI_UPDATE_EVERY = 15; // Only rebuild detections/threats DOM every N frames
+
+        // Cached DOM refs — avoid repeated lookups
+        const videoFeed      = document.getElementById('videoFeed');
+        const loadingEl      = document.getElementById('loading');
+        const statusEl       = document.getElementById('connectionStatus');
+        const connectBtn     = document.getElementById('connectBtn');
+        const disconnectBtn  = document.getElementById('disconnectBtn');
+        const frameCountEl   = document.getElementById('frameCount');
+        const detectionCountEl = document.getElementById('detectionCount');
+        const threatCountEl  = document.getElementById('threatCount');
+        const fpsEl          = document.getElementById('fps');
+        const detectionsListEl = document.getElementById('detectionsList');
+        const threatsListEl  = document.getElementById('threatsList');
+
+        // Track the previous Blob URL so we can revoke it and free memory
+        let prevBlobUrl = null;
 
         function connect() {
-            const videoFeed = document.getElementById('videoFeed');
-            const loading = document.getElementById('loading');
-            const status = document.getElementById('connectionStatus');
-            const connectBtn = document.getElementById('connectBtn');
-            const disconnectBtn = document.getElementById('disconnectBtn');
-
-            // Show loading
-            loading.style.display = 'block';
+            loadingEl.style.display = 'block';
             videoFeed.style.display = 'none';
 
-            // Connect to WebSocket
             ws = new WebSocket('ws://localhost:8000/ws/video');
+            ws.binaryType = 'arraybuffer'; // not used here but good practice
 
             ws.onopen = () => {
                 console.log('Connected to TRINETRA');
-                status.textContent = 'CONNECTED';
-                status.classList.remove('disconnected');
+                statusEl.textContent = 'CONNECTED';
+                statusEl.classList.remove('disconnected');
                 connectBtn.disabled = true;
                 disconnectBtn.disabled = false;
             };
 
             ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
+                let data;
+                try {
+                    data = JSON.parse(event.data);
+                } catch (e) {
+                    console.error('Parse error', e);
+                    return;
+                }
 
                 if (data.error) {
                     console.error('Error:', data.error);
@@ -337,51 +359,70 @@
                     return;
                 }
 
-                // Hide loading, show video
-                loading.style.display = 'none';
-                videoFeed.style.display = 'block';
-
-                // Update video frame
+                // ── VIDEO FRAME ──────────────────────────────────────────────
+                // Use Blob URL instead of raw base64 string — far less GC pressure
                 if (data.frame) {
-                    videoFeed.src = 'data:image/jpeg;base64,' + data.frame;
+                    const byteChars = atob(data.frame);
+                    const byteArr = new Uint8Array(byteChars.length);
+                    for (let i = 0; i < byteChars.length; i++) {
+                        byteArr[i] = byteChars.charCodeAt(i);
+                    }
+                    const blob = new Blob([byteArr], { type: 'image/jpeg' });
+                    const newUrl = URL.createObjectURL(blob);
+                    videoFeed.src = newUrl;
+
+                    // Revoke previous URL once new one is set (frees memory)
+                    if (prevBlobUrl) URL.revokeObjectURL(prevBlobUrl);
+                    prevBlobUrl = newUrl;
+
+                    if (videoFeed.style.display === 'none') {
+                        loadingEl.style.display = 'none';
+                        videoFeed.style.display = 'block';
+                    }
                 }
 
-                // Update statistics
+                // ── STATS (every frame — lightweight text only) ───────────────
                 frameCount = data.frame_number || frameCount + 1;
-                document.getElementById('frameCount').textContent = frameCount;
-                document.getElementById('detectionCount').textContent = data.detections?.length || 0;
-                document.getElementById('threatCount').textContent = data.threats?.length || 0;
+                frameCountEl.textContent = frameCount;
+                detectionCountEl.textContent = data.detections?.length ?? 0;
+                threatCountEl.textContent   = data.threats?.length ?? 0;
 
-                // Calculate FPS
+                // FPS counter
                 const now = Date.now();
                 fpsCounter++;
                 if (now - lastFrameTime >= 1000) {
-                    document.getElementById('fps').textContent = fpsCounter;
+                    fpsEl.textContent = fpsCounter;
                     fpsCounter = 0;
                     lastFrameTime = now;
                 }
 
-                // Update detections list
-                updateDetections(data.detections || []);
-
-                // Update threats list
-                updateThreats(data.threats || []);
+                // ── DETECTION / THREAT LISTS (throttled) ─────────────────────
+                uiUpdateCounter++;
+                if (uiUpdateCounter >= UI_UPDATE_EVERY) {
+                    uiUpdateCounter = 0;
+                    updateDetections(data.detections || []);
+                    updateThreats(data.threats || []);
+                }
             };
 
             ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
-                status.textContent = 'ERROR';
-                status.classList.add('disconnected');
+                statusEl.textContent = 'ERROR';
+                statusEl.classList.add('disconnected');
             };
 
             ws.onclose = () => {
                 console.log('Disconnected from TRINETRA');
-                status.textContent = 'DISCONNECTED';
-                status.classList.add('disconnected');
+                statusEl.textContent = 'DISCONNECTED';
+                statusEl.classList.add('disconnected');
                 connectBtn.disabled = false;
                 disconnectBtn.disabled = true;
-                loading.style.display = 'block';
+                loadingEl.style.display = 'block';
                 videoFeed.style.display = 'none';
+                if (prevBlobUrl) {
+                    URL.revokeObjectURL(prevBlobUrl);
+                    prevBlobUrl = null;
+                }
             };
         }
 
@@ -393,17 +434,14 @@
         }
 
         function updateDetections(detections) {
-            const list = document.getElementById('detectionsList');
-            
             if (detections.length === 0) {
-                list.innerHTML = '<p style="color: #888; text-align: center;">No detections yet...</p>';
+                detectionsListEl.innerHTML = '<p style="color: #888; text-align: center;">No detections yet...</p>';
                 return;
             }
-
-            list.innerHTML = detections.map(det => `
+            detectionsListEl.innerHTML = detections.map(det => `
                 <div class="detection-item">
-                    <strong>${det.class.toUpperCase()}</strong> #${det.track_id}<br>
-                    <small>Confidence: ${(det.confidence * 100).toFixed(1)}%</small><br>
+                    <strong>${det.class ? det.class.toUpperCase() : 'UNKNOWN'}</strong> #${det.track_id ?? '?'}<br>
+                    <small>Confidence: ${det.confidence != null ? (det.confidence * 100).toFixed(1) : '?'}%</small><br>
                     ${det.pose ? `<small>Pose: ${det.pose}</small><br>` : ''}
                     ${det.weapon ? `<small style="color: #FF0000;">⚠️ WEAPON: ${det.weapon.type}</small>` : ''}
                 </div>
@@ -411,27 +449,22 @@
         }
 
         function updateThreats(threats) {
-            const list = document.getElementById('threatsList');
-            
             if (threats.length === 0) {
-                list.innerHTML = '<p style="color: #888; text-align: center;">No threats detected</p>';
+                threatsListEl.innerHTML = '<p style="color: #888; text-align: center;">No threats detected</p>';
                 return;
             }
-
-            list.innerHTML = threats.map(threat => `
+            threatsListEl.innerHTML = threats.map(threat => `
                 <div class="threat-item">
                     <span class="threat-level ${threat.level}">${threat.level}</span>
                     <strong> ${threat.type || 'Unknown Threat'}</strong><br>
-                    <small>Score: ${(threat.score * 100).toFixed(1)}%</small><br>
+                    <small>Score: ${threat.score != null ? (threat.score * 100).toFixed(1) : '?'}%</small><br>
                     <small>Behaviors: ${threat.behaviors?.join(', ') || 'None'}</small>
                 </div>
             `).join('');
         }
 
         // Auto-connect on page load
-        window.addEventListener('load', () => {
-            setTimeout(connect, 500);
-        });
+        window.addEventListener('load', () => setTimeout(connect, 500));
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', disconnect);

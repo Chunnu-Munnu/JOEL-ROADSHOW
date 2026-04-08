@@ -129,7 +129,7 @@ async def video_stream(websocket: WebSocket):
                 break
             
             frame_count += 1
-            frame = cv2.resize(frame, (1280, 720))
+            frame = cv2.resize(frame, (854, 480))
             
             # Run detection
             detections = []
@@ -171,8 +171,8 @@ async def video_stream(websocket: WebSocket):
                     print(f"Drawing error: {e}")
             
             # Encode and send
-            _, buffer = cv2.imencode('.jpg', annotated_frame, 
-                                     [cv2.IMWRITE_JPEG_QUALITY, 80])
+            _, buffer = cv2.imencode('.jpg', annotated_frame,
+                                     [cv2.IMWRITE_JPEG_QUALITY, 65])
             frame_base64 = base64.b64encode(buffer).decode('utf-8')
             
             response = {
@@ -188,7 +188,7 @@ async def video_stream(websocket: WebSocket):
                 print("❌ Serialization error:", e)
                 print("❌ Problematic data:", response)
             
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.033)  # ~30fps target
             
     except WebSocketDisconnect:
         print("📹 Client disconnected")
